@@ -1,0 +1,3 @@
+[submodule "bindsnet"]
+	path = bindsnet
+	url = git@github.com:danielgafni/bindsnet.git
