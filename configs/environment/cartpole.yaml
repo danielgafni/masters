@@ -1,0 +1,6 @@
+defaults:
+ - base_cartpole
+
+in_neurons: 8
+in_shape: [2, 4]
+out_neurons: 2
