@@ -33,32 +33,32 @@ def main(cfg: Config):
     network = Network(dt=1.0)
 
     # Layers of neurons.
-    inpt = Input(n=cfg.environment.in_neurons, shape=[1, 1, 2, 4], traces=True)
-    middle = LIFNodes(n=100, traces=True)
-    out = LIFNodes(n=2, refrac=0, traces=True)
+    inpt = Input(n=cfg.environment.in_neurons, traces=True)
+    middle = LIFNodes(n=2, traces=True)
+    # out = LIFNodes(n=2, refrac=0, traces=True)
 
     # Connections between layers.
-    inpt_middle = Connection(source=inpt, target=middle, wmin=0, wmax=1e-1)
-    middle_out = Connection(
-        source=middle,
-        target=out,
-        wmin=0,
-        wmax=1,
-        update_rule=MSTDP,
-        nu=[1e-3, 1e-4],
-        norm=0.5 * middle.n,
-    )
+    inpt_middle = Connection(source=inpt, target=middle, wmin=0, wmax=1e-1, update_rule=MSTDP)
+    # middle_out = Connection(
+    #     source=middle,
+    #     target=out,
+    #     wmin=0,
+    #     wmax=1,
+    #     update_rule=MSTDP,
+    #     nu=[1e-3, 1e-4],
+    #     norm=0.5 * middle.n,
+    # )
     middle_inhibitory = Connection(
-        source=middle, target=middle, wmin=0, wmax=1, update_rule=PostPre, nu=[-1e-4, 1e-3], norm=-0.5 * middle.n
+        source=middle, target=middle, wmin=0, wmax=1, update_rule=PostPre, nu=[-1e-4, -1e-3], norm=-0.5 * middle.n
     )
 
     # Add all layers and connections to the network.
     network.add_layer(inpt, name="Input Layer")
     network.add_layer(middle, name="Hidden Layer")
-    network.add_layer(out, name="Output Layer")
+    # network.add_layer(out, name="Output Layer")
     network.add_connection(inpt_middle, source="Input Layer", target="Hidden Layer")
     network.add_connection(middle_inhibitory, source="Hidden Layer", target="Hidden Layer")
-    network.add_connection(middle_out, source="Hidden Layer", target="Output Layer")
+    # network.add_connection(middle_out, source="Hidden Layer", target="Output Layer")
 
     # Load the Breakout environment.
     environment = GymEnvironment("CartPole-v0")
@@ -70,7 +70,7 @@ def main(cfg: Config):
         environment,
         encoding=convert_to_positive(bernoulli),
         action_function=select_softmax,
-        output="Output Layer",
+        output="Hidden Layer",
         time=100,
         history_length=1,
         delta=1,
@@ -96,13 +96,13 @@ def main(cfg: Config):
             print(f"Episode {i} total reward:{total_reward}")
 
     print("Training: ")
-    run_pipeline(environment_pipeline, episode_count=1000)
+    run_pipeline(environment_pipeline, episode_count=cfg.train_episodes)
 
     # stop MSTDP
     environment_pipeline.network.learning = False
 
     print("Testing: ")
-    run_pipeline(environment_pipeline, episode_count=1000)
+    run_pipeline(environment_pipeline, episode_count=cfg.test_episodes)
 
 
 if __name__ == "__main__":
