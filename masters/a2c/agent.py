@@ -24,6 +24,10 @@ class A2CAgent:
         prev_critic_max_time: int = 100,
         spikes_to_value: float = 10.0,
     ):
+        """
+        actor output must have the shape of [time, ..., population_size, n_actions]
+        critic and prev_critic must have the shape of [time, ..., population_size]
+        """
         self.actor = actor
         self.output_actor_layer = output_actor_layer
         self.actor_max_time = actor_max_time
@@ -67,6 +71,8 @@ class A2CAgent:
                 reward=reward,
                 **kwargs,
             )
+            .float()
+            .mean(dim=-1)
             .sum()
             .item()
         ) * self.spikes_to_value
