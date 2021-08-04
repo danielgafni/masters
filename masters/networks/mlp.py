@@ -1,4 +1,5 @@
-from typing import List, Optional, Sequence, Union
+from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 from bindsnet.learning import MSTDPET
@@ -10,50 +11,81 @@ from bindsnet.network.topology import Connection
 from masters.networks import INPUT_LAYER_NAME, OUTPUT_LAYER_NAME
 
 
-def make_mlp(
-    input_shape: List[int],
-    output_shape: List[int],
-    norm: float = 0.5,
-    nu: Optional[Union[float, Sequence[float]]] = (1e-2, 1e-3),
-    time: int = 100,
-    dev: bool = False,
-):
-    # Build network.
-    network = Network(dt=1.0)
+@dataclass
+class MLPConfig:
+    input_shape: List[int]
+    output_shape: List[int]
+    norm: float = 0.5
+    a_plus: float = 1e-2
+    a_minus: float = -1e-3
+    thresh: float = -52.0
+    time: int = 100
+    dev: bool = False
 
-    layers = []
-    # Layers of neurons.
+    _target_: str = "masters.networks.mlp.MLP"
 
-    inpt = Input(n=np.prod(input_shape), shape=input_shape, traces=True)
-    layers.append(inpt)
-    network.add_layer(inpt, INPUT_LAYER_NAME)
 
-    out = LIFNodes(n=np.prod(output_shape), shape=output_shape, traces=True)
-    layers.append(out)
-    network.add_layer(out, OUTPUT_LAYER_NAME)
+class MLP:
+    def __init__(
+        self,
+        input_shape: List[int],
+        output_shape: List[int],
+        norm: float = 0.5,
+        a_plus: float = 1e-2,
+        a_minus: float = -1e-3,
+        thresh: float = -52.0,
+        time: int = 100,
+        dev: bool = False,
+    ):
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+        self.norm = norm
+        self.a_plus = a_plus
+        self.a_minus = a_minus
+        self.thresh = thresh
+        self.time = time
+        self.dev = dev
 
-    network.add_connection(
-        Connection(
-            source=inpt,
-            target=layers[1],
-            wmin=0,
-            wmax=1,
-            update_rule=MSTDPET,
-            nu=nu,
-            norm=norm * inpt.n,
-        ),
-        source=INPUT_LAYER_NAME,
-        target=OUTPUT_LAYER_NAME,
-    )
+        self.input_size = int(np.prod(self.input_shape))
 
-    if dev:
-        for name, layer in network.layers.items():
-            state_vars = ("s",) if type(layer) == Input else ("s", "v")
-            monitor = Monitor(layer, state_vars=state_vars, time=time)
-            network.add_monitor(monitor, name)
+        nu = (-a_minus, a_plus)
 
-    else:
-        output_monitor = Monitor(network.layers[OUTPUT_LAYER_NAME], state_vars=("s",), time=time)
-        network.add_monitor(output_monitor, OUTPUT_LAYER_NAME)
+        # Build network.
+        self.network = Network(dt=1.0)
 
-    return network
+        layers = []
+        # Layers of neurons.
+
+        inpt = Input(n=np.prod(input_shape), shape=input_shape, traces=True)
+        layers.append(inpt)
+        self.network.add_layer(inpt, INPUT_LAYER_NAME)
+
+        out = LIFNodes(n=np.prod(output_shape), shape=output_shape, traces=True, thresh=thresh)
+        layers.append(out)
+        self.network.add_layer(out, OUTPUT_LAYER_NAME)
+
+        norm_ = norm * inpt.n if norm is not None else None
+
+        self.network.add_connection(
+            Connection(
+                source=inpt,
+                target=layers[1],
+                wmin=0,
+                wmax=1,
+                update_rule=MSTDPET,
+                nu=nu,
+                norm=norm_,
+            ),
+            source=INPUT_LAYER_NAME,
+            target=OUTPUT_LAYER_NAME,
+        )
+
+        if dev:
+            for name, layer in self.network.layers.items():
+                state_vars = ("s",) if type(layer) == Input else ("s", "v")
+                monitor = Monitor(layer, state_vars=state_vars, time=time)
+                self.network.add_monitor(monitor, name)
+
+        else:
+            output_monitor = Monitor(self.network.layers[OUTPUT_LAYER_NAME], state_vars=("s",), time=time)
+            self.network.add_monitor(output_monitor, OUTPUT_LAYER_NAME)

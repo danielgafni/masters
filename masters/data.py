@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import numpy as np
+import torch
 from PIL import Image
 
 
@@ -23,6 +24,18 @@ class Episode:
     def total_reward(self):
         return sum([t.reward for t in self.transitions])
 
+    @property
+    def replay(self):
+        frames = []
+        for t in self.transitions:
+            assert t.render is not None
+
+            frames.append(torch.from_numpy(t.render.copy()))
+
+        video = torch.stack(frames).permute(0, 3, 1, 2).unsqueeze(0)
+
+        return video
+
     def render_replay(self, output_path: str):
         Image.fromarray(self.transitions[0].render).save(
             output_path,
@@ -36,9 +49,6 @@ class Experience:
     episodes: List[Episode]
 
 
-cartpole_info = {
-    0: dict(start=-1, end=1, scale=0.05, n=20),
-    1: dict(start=-2, end=2, scale=0.1, n=20),
-    2: dict(start=-1, end=1, scale=0.05, n=20),
-    3: dict(start=-10, end=10, scale=0.5, n=20),
-}
+@dataclass
+class EncoderConfig:
+    pass

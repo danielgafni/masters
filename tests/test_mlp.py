@@ -1,6 +1,6 @@
 import pytest
 
-from masters.networks.mlp import make_mlp
+from masters.networks.mlp import MLP
 
 
 @pytest.fixture
@@ -19,6 +19,6 @@ def prev_critic():
 
 
 def test_make_mlp():
-    mlp = make_mlp(input_shape=[4], output_shape=[2])
+    mlp = MLP(input_shape=[4], output_shape=[2])
 
     assert mlp is not None

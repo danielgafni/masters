@@ -12,6 +12,8 @@ hydra-core = "1.1.0.dev5"
 hydra-colorlog = "1.1.0.dev1"
 pytest-cases = "^3.6.3"
 Box2D = "^2.3.10"
+tensorboard = "^2.5.0"
+moviepy = "^1.0.3"
 
 [tool.poetry.dev-dependencies]
 poethepoet = "^0.10.0"
