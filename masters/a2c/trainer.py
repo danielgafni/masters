@@ -27,7 +27,7 @@ class A2CTrainerConfig:
     spikes_to_value: float = 1.0
     start_actor_train: int = 100
     num_test_episodes: int = 200
-    device: str = "gpu" if torch.cuda.is_available() else "cpu"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
     log: bool = True
     heavy_log_freq: int = 10
     experiment_name: str = "a2c"
@@ -44,7 +44,7 @@ class A2CTrainer:
         spikes_to_value: float = 1.0,
         start_actor_train: int = 100,
         num_test_episodes: int = 200,
-        device: torch.device = torch.device("cpu"),
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
         log: bool = False,
         heavy_log_freq: int = 10,
         experiment_name: str = "a2c",
@@ -55,7 +55,7 @@ class A2CTrainer:
         self.start_actor_train = start_actor_train
         self.num_test_episodes = num_test_episodes
         self.spikes_to_value = spikes_to_value
-        self.device = device
+        self.device = torch.device(device)
         self.log = log
         self.heavy_log_freq = heavy_log_freq
         self.experiment_name = experiment_name
@@ -106,8 +106,8 @@ class A2CTrainer:
             deltas: List[float] = []
 
             for transition in episode.transitions:
-                observation = torch.from_numpy(transition.observation)
-                prev_observation = torch.from_numpy(transition.prev_observation)
+                observation = torch.from_numpy(transition.observation).to(self.device)
+                prev_observation = torch.from_numpy(transition.prev_observation).to(self.device)
                 action = transition.action
                 reward = transition.reward
                 done = transition.done

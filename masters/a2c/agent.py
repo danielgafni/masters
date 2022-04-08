@@ -116,9 +116,10 @@ class A2CAgent:
         net.reset_state_variables()
 
         original_training = net.training
+        original_device = observation.device
         net.train(train)
 
-        encoded_observation = self.encoder(observation)
+        encoded_observation = self.encoder(observation.cpu()).to(original_device)
         inpts = {INPUT_LAYER_NAME: encoded_observation}
         net.run(inpts, time=max_time, reward=reward, **kwargs)
         spikes = net.monitors[OUTPUT_LAYER_NAME].get("s")
