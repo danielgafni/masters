@@ -54,7 +54,7 @@ class A2CAgent:
             actor_thresh=actor.thresh,
             actor_time=actor.time,
             actor_input_size=actor.input_size,
-            actor_population_size=actor.population_size,
+            actor_n_hidden=actor.n_hidden,
             actor_action_space_size=actor.action_space_size,
             # critic
             critic_a_plus=critic.a_plus,
@@ -62,7 +62,7 @@ class A2CAgent:
             critic_thresh=critic.thresh,
             critic_time=critic.time,
             critic_input_size=critic.input_size,
-            critic_population_size=critic.population_size,
+            critic_n_hidden=critic.n_hidden,
             # encoder
             **encoder_hparams,
         )
@@ -95,6 +95,7 @@ class A2CAgent:
                 **kwargs,
             )
             .float()
+            # TODO: take last n timestamps
             .mean(dim=-1)
             .sum()
             .item()
@@ -148,29 +149,31 @@ class A2CAgent:
         self.critic.network.to(device)
 
     def log_weights(self, writer: SummaryWriter, tag_prefix: str = ""):
-        actor_weights = []
-        for conn in self.actor.network.connections:
-            actor_weights.append(self.actor.network.connections[conn].w.data.unsqueeze(0))
-
-        writer.add_images(f"{tag_prefix}/actor_weights", torch.stack(actor_weights), self.num_episodes)
-
-        critic_weights = []
-        for conn in self.critic.network.connections:
-            critic_weights.append(self.critic.network.connections[conn].w.data.unsqueeze(0))
-
-        writer.add_images(f"{tag_prefix}/critic_weights", torch.stack(critic_weights), self.num_episodes)
+        pass
+        # actor_weights = []
+        # for conn in self.actor.network.connections:
+        #     actor_weights.append(self.actor.network.connections[conn].w.data.unsqueeze(0))
+        #
+        # writer.add_images(f"{tag_prefix}/actor_weights", torch.stack(actor_weights), self.num_episodes)
+        #
+        # critic_weights = []
+        # for conn in self.critic.network.connections:
+        #     critic_weights.append(self.critic.network.connections[conn].w.data.unsqueeze(0))
+        #
+        # writer.add_images(f"{tag_prefix}/critic_weights", torch.stack(critic_weights), self.num_episodes)
 
     def log_spikes(self, writer: SummaryWriter, tag_prefix: str = ""):
-        writer.add_image(
-            f"{tag_prefix}/actor_spikes",
-            self.actor.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.actor.time, -1).float(),
-            self.num_episodes,
-        )
-        writer.add_image(
-            f"{tag_prefix}/critic_spikes",
-            self.critic.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.critic.time, -1).float(),
-            self.num_episodes,
-        )
+        pass
+        # writer.add_image(
+        #     f"{tag_prefix}/actor_spikes",
+        #     self.actor.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.actor.time, -1).float(),
+        #     self.num_episodes,
+        # )
+        # writer.add_image(
+        #     f"{tag_prefix}/critic_spikes",
+        #     self.critic.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.critic.time, -1).float(),
+        #     self.num_episodes,
+        # )
 
     # def log_voltages(self, writer: SummaryWriter, tag_prefix: str = ""):
     #     actor_fig = plt.Figure()

@@ -1,21 +1,23 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import numpy as np
-from bindsnet.learning import MSTDPET
+from bindsnet.learning import MSTDPET, PostPre
 from bindsnet.network import Network
 from bindsnet.network.monitors import Monitor
 from bindsnet.network.nodes import Input, LIFNodes
 from bindsnet.network.topology import Connection
 
-from masters.networks import INPUT_LAYER_NAME, OUTPUT_LAYER_NAME
+from masters.networks import HIDDEN_LAYER_NAME, INPUT_LAYER_NAME, OUTPUT_LAYER_NAME
 
 
 @dataclass
 class MLPConfig:
     input_shape: List[int]
-    output_shape: List[int]
-    norm: float = 0.5
+    n_hidden: int
+    n_out: int
+    norm_hidden_out: Optional[float] = 0.5
+    norm_recurrent: Optional[float] = 5e-3
     a_plus: float = 1e-2
     a_minus: float = -1e-3
     thresh: float = -52.0
@@ -29,8 +31,10 @@ class MLP:
     def __init__(
         self,
         input_shape: List[int],
-        output_shape: List[int],
-        norm: float = 0.5,
+        n_hidden: int,
+        n_out: int,
+        norm_hidden_out: Optional[float] = 0.5,
+        norm_recurrent: Optional[float] = 5e-3,
         a_plus: float = 1e-2,
         a_minus: float = -1e-3,
         thresh: float = -52.0,
@@ -38,8 +42,10 @@ class MLP:
         dev: bool = False,
     ):
         self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.norm = norm
+        self.n_hidden = n_hidden
+        self.n_out = n_out
+        self.norm_hidden_out = norm_hidden_out
+        self.norm_recurrent = norm_recurrent
         self.a_plus = a_plus
         self.a_minus = a_minus
         self.thresh = thresh
@@ -53,32 +59,43 @@ class MLP:
         # Build network.
         self.network = Network(dt=1.0)
 
-        layers = []
         # Layers of neurons.
-
         inpt = Input(n=np.prod(input_shape), shape=input_shape, traces=True)
-        layers.append(inpt)
-        self.network.add_layer(inpt, INPUT_LAYER_NAME)
+        hidden = LIFNodes(n=n_hidden, traces=True, thresh=thresh)
+        out = LIFNodes(n=n_out, traces=True, thresh=thresh, refrac=0)
 
-        out = LIFNodes(n=np.prod(output_shape), shape=output_shape, traces=True, thresh=thresh)
-        layers.append(out)
-        self.network.add_layer(out, OUTPUT_LAYER_NAME)
+        # Connections
+        inpt_middle = Connection(source=inpt, target=hidden, wmin=0, wmax=1)
 
-        norm_ = norm * inpt.n if norm is not None else None
-
-        self.network.add_connection(
-            Connection(
-                source=inpt,
-                target=layers[1],
-                wmin=0,
-                wmax=1,
-                update_rule=MSTDPET,
-                nu=nu,
-                norm=norm_,
-            ),
-            source=INPUT_LAYER_NAME,
-            target=OUTPUT_LAYER_NAME,
+        # Connections from hidden layer to output layer
+        middle_out = Connection(
+            source=hidden,
+            target=out,
+            wmin=0,  # minimum weight value
+            wmax=1,  # maximum weight value
+            update_rule=MSTDPET,  # learning rule
+            nu=nu,  # learning rate
+            norm=norm_hidden_out * hidden.n if norm_hidden_out is not None else None,  # normalization
         )
+
+        # Recurrent connection, retaining data within the hidden layer
+        recurrent = Connection(
+            source=hidden,
+            target=hidden,
+            wmin=0,  # minimum weight value
+            wmax=1,  # maximum weight value
+            update_rule=PostPre,  # learning rule
+            nu=nu,  # learning rate
+            norm=norm_recurrent * hidden.n if norm_recurrent is not None else None,  # normalization
+        )
+
+        # Add all layers and connections to the network.
+        self.network.add_layer(inpt, name=INPUT_LAYER_NAME)
+        self.network.add_layer(hidden, name=HIDDEN_LAYER_NAME)
+        self.network.add_layer(out, name=OUTPUT_LAYER_NAME)
+        self.network.add_connection(inpt_middle, source=INPUT_LAYER_NAME, target=HIDDEN_LAYER_NAME)
+        self.network.add_connection(middle_out, source=HIDDEN_LAYER_NAME, target=OUTPUT_LAYER_NAME)
+        self.network.add_connection(recurrent, source=HIDDEN_LAYER_NAME, target=HIDDEN_LAYER_NAME)
 
         if dev:
             for name, layer in self.network.layers.items():

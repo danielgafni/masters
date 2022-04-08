@@ -152,7 +152,7 @@ class A2CTrainer:
                 if self.log:
                     assert self.writer is not None
 
-                    self.writer.add_video("Train/replay", episode.replay, agent.num_episodes)
+                    self.writer.add_video("Train/replay", episode.replay, agent.num_episodes, fps=10)
 
                     agent.log_weights(self.writer, tag_prefix="Train")
                     agent.log_spikes(self.writer, tag_prefix="Train")
@@ -247,12 +247,13 @@ class A2CTrainer:
             train=True,
             reward=delta,
             # clamp={OUTPUT_LAYER_NAME: clamp},
-            unclamp={OUTPUT_LAYER_NAME: unclamp},
+            unclamp={OUTPUT_LAYER_NAME: unclamp},  # TODO: switch to competition to remove this
         )
 
     def train_critic(self, agent: A2CAgent, observation: torch.Tensor, prev_observation: torch.Tensor, delta: float):
+        # TODO: add eligibility trace
         agent.run_critic(observation=observation, reward=-delta, train=True)
-        agent.run_critic(observation=prev_observation, reward=delta, train=True)
+        # agent.run_critic(observation=prev_observation, reward=delta, train=True)  # TODO: remove
 
     def compute_delta(self, value: float, prev_value: float, reward: float):
         return self.spikes_to_value * (value * self.gamma - prev_value) + reward

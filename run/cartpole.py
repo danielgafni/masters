@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 import hydra
 from bindsnet.encoding.encoders import GaussianReceptiveFieldsEncoder
@@ -23,11 +23,11 @@ cartpole_info = {
 @dataclass
 class CartPoleActorConfig(ActorConfig):
     input_shape: List[int] = field(default_factory=lambda: [260])
-    output_shape: List[int] = field(default_factory=lambda: [50, 2])
-    a_minus: float = -1e-3
-    a_plus: float = 5e-3
-    thresh: float = -58.0
-    norm: Optional[float] = None
+    n_hidden: int = 100
+    n_out: int = 2
+    a_minus: float = -1e-2
+    a_plus: float = 1e-2
+    thresh: float = -57.0
     time: int = 100
     dev: bool = True
 
@@ -40,11 +40,11 @@ class CartPoleActorConfig(ActorConfig):
 @dataclass
 class CartPoleCriticConfig(CriticConfig):
     input_shape: List[int] = field(default_factory=lambda: [260])
-    output_shape: List[int] = field(default_factory=lambda: [100])
-    a_minus: float = -1e-3
-    a_plus: float = 5e-3
+    n_hidden: int = 100
+    n_out: int = 100
+    a_minus: float = -1e-2
+    a_plus: float = 1e-2
     thresh: float = -57.0
-    norm: Optional[float] = None
     time: int = 100
     dev: bool = True
 
