@@ -1,59 +1,83 @@
-from typing import Optional
+import logging
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 import torch
+from bindsnet.analysis.visualization import summary
 from bindsnet.encoding import Encoder
-from bindsnet.encoding.encoders import PositiveEncoder
 from bindsnet.network import Network
+from torch.utils.tensorboard import SummaryWriter
 
 from masters.a2c.action import select_softmax
 from masters.networks import INPUT_LAYER_NAME, OUTPUT_LAYER_NAME
+from masters.networks.actor import Actor, ActorConfig
+from masters.networks.critic import Critic, CriticConfig
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class A2CAgentConfig:
+    """
+    Base config for inheritance
+    """
+
+    actor: ActorConfig
+    critic: CriticConfig
+
+    _target_: str = "masters.a2c.agent.A2CAgent"
 
 
 class A2CAgent:
-    def __init__(
-        self,
-        actor: Network,
-        critic: Network,
-        prev_critic: Network,
-        encoder: Encoder,
-        output_actor_layer: str = OUTPUT_LAYER_NAME,
-        output_critic_layer: str = OUTPUT_LAYER_NAME,
-        output_prev_critic_layer: str = OUTPUT_LAYER_NAME,
-        actor_max_time: int = 100,
-        critic_max_time: int = 100,
-        prev_critic_max_time: int = 100,
-        spikes_to_value: float = 10.0,
-    ):
+    def __init__(self, actor: Actor, critic: Critic, encoder: Encoder, encoder_hparams: Optional[Dict] = None):
         """
         actor output must have the shape of [time, ..., population_size, n_actions]
         critic and prev_critic must have the shape of [time, ..., population_size]
         """
         self.actor = actor
-        self.output_actor_layer = output_actor_layer
-        self.actor_max_time = actor_max_time
-
         self.critic = critic
-        self.output_critic_layer = output_critic_layer
-        self.critic_max_time = critic_max_time
+        self.encoder = encoder
 
-        self.prev_critic = prev_critic
-        self.output_prev_critic_layer = output_prev_critic_layer
-        self.prev_critic_max_time = prev_critic_max_time
+        if encoder_hparams is None:
+            encoder_hparams = {}
+        self.encoder_hparams = encoder_hparams
 
-        self.spikes_to_value = spikes_to_value
+        self.num_steps = 0
+        self.num_episodes = 0
 
-        self.encoder = PositiveEncoder(encoder)
+        self.action_space_size = self.actor.network.layers[OUTPUT_LAYER_NAME].shape[-1]
 
-        self.observation = None
-        self.prev_observation = None
-        self.prev_delta = None
+        self.hparams = dict(
+            # actor
+            actor_a_plus=actor.a_plus,
+            actor_a_minus=actor.a_minus,
+            actor_thresh=actor.thresh,
+            actor_time=actor.time,
+            actor_input_size=actor.input_size,
+            actor_n_hidden=actor.n_hidden,
+            actor_action_space_size=actor.action_space_size,
+            # critic
+            critic_a_plus=critic.a_plus,
+            critic_a_minus=critic.a_minus,
+            critic_thresh=critic.thresh,
+            critic_time=critic.time,
+            critic_input_size=critic.input_size,
+            critic_n_hidden=critic.n_hidden,
+            # encoder
+            **encoder_hparams,
+        )
+
+        actor_summary = summary(self.actor.network)
+        critic_summary = summary(self.critic.network)
+
+        logger.info(f"Actor:\n{actor_summary}")
+        logger.info(f"Critic:\n{critic_summary}")
 
     def run_actor(self, observation: torch.Tensor, train: bool = False, reward: Optional[float] = None, **kwargs):
         spikes = self.run_net(
             observation=observation,
-            net=self.actor,
-            max_time=self.actor_max_time,
-            output_layer=self.output_actor_layer,
+            net=self.actor.network,
+            max_time=self.actor.time,
             train=train,
             reward=reward,
             **kwargs,
@@ -64,40 +88,24 @@ class A2CAgent:
         return (
             self.run_net(
                 observation=observation,
-                net=self.critic,
-                max_time=self.critic_max_time,
-                output_layer=self.output_critic_layer,
+                net=self.critic.network,
+                max_time=self.critic.time,
                 train=train,
                 reward=reward,
                 **kwargs,
             )
             .float()
+            # TODO: take last n timestamps
             .mean(dim=-1)
             .sum()
             .item()
-        ) * self.spikes_to_value
-
-    def run_prev_critic(self, observation: torch.Tensor, train: bool = False, reward: Optional[float] = None, **kwargs):
-        return (
-            self.run_net(
-                observation=observation,
-                net=self.prev_critic,
-                max_time=self.prev_critic_max_time,
-                output_layer=self.output_prev_critic_layer,
-                train=train,
-                reward=reward,
-                **kwargs,
-            )
-            .sum()
-            .item()
-        ) * self.spikes_to_value
+        )
 
     def run_net(
         self,
         observation: torch.Tensor,
         net: Network,
         max_time: int,
-        output_layer: str,
         train: bool = False,
         reward: Optional[float] = None,
         **kwargs,
@@ -113,7 +121,7 @@ class A2CAgent:
         encoded_observation = self.encoder(observation)
         inpts = {INPUT_LAYER_NAME: encoded_observation}
         net.run(inpts, time=max_time, reward=reward, **kwargs)
-        spikes = net.monitors[output_layer].get("s")
+        spikes = net.monitors[OUTPUT_LAYER_NAME].get("s")
 
         net.train(original_training)
 
@@ -137,6 +145,45 @@ class A2CAgent:
         return state_vars
 
     def to(self, device: torch.device):
-        self.actor.to(device)
-        self.critic.to(device)
-        self.critic.to(device)
+        self.actor.network.to(device)
+        self.critic.network.to(device)
+
+    def log_weights(self, writer: SummaryWriter, tag_prefix: str = ""):
+        pass
+        # actor_weights = []
+        # for conn in self.actor.network.connections:
+        #     actor_weights.append(self.actor.network.connections[conn].w.data.unsqueeze(0))
+        #
+        # writer.add_images(f"{tag_prefix}/actor_weights", torch.stack(actor_weights), self.num_episodes)
+        #
+        # critic_weights = []
+        # for conn in self.critic.network.connections:
+        #     critic_weights.append(self.critic.network.connections[conn].w.data.unsqueeze(0))
+        #
+        # writer.add_images(f"{tag_prefix}/critic_weights", torch.stack(critic_weights), self.num_episodes)
+
+    def log_spikes(self, writer: SummaryWriter, tag_prefix: str = ""):
+        pass
+        # writer.add_image(
+        #     f"{tag_prefix}/actor_spikes",
+        #     self.actor.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.actor.time, -1).float(),
+        #     self.num_episodes,
+        # )
+        # writer.add_image(
+        #     f"{tag_prefix}/critic_spikes",
+        #     self.critic.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.critic.time, -1).float(),
+        #     self.num_episodes,
+        # )
+
+    # def log_voltages(self, writer: SummaryWriter, tag_prefix: str = ""):
+    #     actor_fig = plt.Figure()
+    #     writer.add_image(
+    #         f"{tag_prefix}/actor_voltages",
+    #         self.actor.network.monitors[OUTPUT_LAYER_NAME].get("v").view(1, self.actor.time, -1).float(),
+    #         self.num_episodes,
+    #     )
+    #     writer.add_image(
+    #         f"{tag_prefix}/critic_voltages",
+    #         self.critic.network.monitors[OUTPUT_LAYER_NAME].get("v").view(1, self.critic.time, -1).float(),
+    #         self.num_episodes,
+    #     )
