@@ -1,15 +1,14 @@
 import torch
 
 
-def select_softmax(spikes: torch.FloatTensor):
+def select_softmax(logits: torch.FloatTensor):
     # language=rst
     """
     Selects an action using softmax function based on spiking from a network layer.
 
-    :return: Action sampled from softmax over activity of similarly-sized output layer.
+    :return: Action sampled from logits softmax
     """
-    spikes = spikes.sum(dim=0).flatten()  # type: ignore
 
-    probabilities = torch.softmax(spikes, dim=0)
+    probabilities = torch.softmax(logits, dim=0)
 
     return torch.multinomial(probabilities, num_samples=1).item()
