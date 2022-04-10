@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 import hydra
 from bindsnet.encoding.encoders import GaussianReceptiveFieldsEncoder
@@ -23,11 +23,13 @@ cartpole_info = {
 @dataclass
 class CartPoleActorConfig(ActorConfig):
     input_shape: List[int] = field(default_factory=lambda: [260])
-    n_hidden: int = 100
-    n_out: int = 2
+    # n_hidden: int = 100
+    n_out: int = 200
+    action_space_size: int = 2
     a_minus: float = -1e-2
     a_plus: float = 1e-2
     thresh: float = -57.0
+    weight_decay: Optional[float] = 1e-2
     time: int = 100
     dev: bool = True
 
@@ -40,11 +42,12 @@ class CartPoleActorConfig(ActorConfig):
 @dataclass
 class CartPoleCriticConfig(CriticConfig):
     input_shape: List[int] = field(default_factory=lambda: [260])
-    n_hidden: int = 100
+    # n_hidden: int = 100
     n_out: int = 100
-    a_minus: float = -1e-2
+    a_minus: float = -1e2
     a_plus: float = 1e-2
     thresh: float = -57.0
+    weight_decay: Optional[float] = 1e-2
     time: int = 100
     dev: bool = True
 
@@ -69,11 +72,12 @@ class CartPoleA2CAgentConfig(A2CAgentConfig):
 
 @dataclass
 class CartPoleA2CTrainerConfig(A2CTrainerConfig):
-    num_episodes: int = 5000
-    max_steps: int = 200
-    gamma: float = 0.95
-    spikes_to_value: float = 1.0
-    start_actor_train: int = 100
+    num_episodes: int = 1000
+    max_steps: int = 1000
+    gamma: float = 0.99
+    spikes_to_value: float = 0.15
+    value_offset: float = -3.0
+    start_actor_train: int = 200
     num_test_episodes: int = 200
     experiment_name: str = "a2c/CartPole"
 
@@ -103,8 +107,8 @@ def run(cfg: RunConfig):
 
     agent.to(trainer.device)
 
-    trainer.fit(agent, "CartPole-v0", num_episodes=500)
-    trainer.test(agent, "CartPole-v0", num_episodes=100)
+    trainer.fit(agent, "CartPole-v0")
+    trainer.test(agent, "CartPole-v0")
 
 
 @hydra.main(config_path=None, config_name="run")

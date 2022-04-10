@@ -4,6 +4,7 @@ from typing import List, Optional
 from uuid import uuid1
 
 import torch
+from bindsnet.network import Network
 from torch.utils.tensorboard import SummaryWriter
 
 from masters.a2c.agent import A2CAgent
@@ -25,12 +26,14 @@ class A2CTrainerConfig:
     max_steps: int = 200
     gamma: float = 0.95
     spikes_to_value: float = 1.0
+    value_offset: float = 0.0
     start_actor_train: int = 100
     num_test_episodes: int = 200
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     log: bool = True
-    heavy_log_freq: int = 10
+    heavy_log_freq: int = 20
     experiment_name: str = "a2c"
+    desired_reward: float = 200.0
 
     _target_: str = "masters.a2c.trainer.A2CTrainer"
 
@@ -42,12 +45,14 @@ class A2CTrainer:
         max_steps: int = 200,
         gamma: float = 0.91,
         spikes_to_value: float = 1.0,
+        value_offset: float = 0.0,
         start_actor_train: int = 100,
         num_test_episodes: int = 200,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         log: bool = False,
-        heavy_log_freq: int = 10,
+        heavy_log_freq: int = 20,
         experiment_name: str = "a2c",
+        desired_reward: float = 200.0,
     ):
         self.num_episodes = num_episodes
         self.max_steps = max_steps
@@ -55,16 +60,19 @@ class A2CTrainer:
         self.start_actor_train = start_actor_train
         self.num_test_episodes = num_test_episodes
         self.spikes_to_value = spikes_to_value
+        self.value_offset = value_offset
         self.device = torch.device(device)
         self.log = log
         self.heavy_log_freq = heavy_log_freq
         self.experiment_name = experiment_name
+        self.desired_reward = desired_reward
 
         self.hparams = dict(
             num_episodes=num_episodes,
             max_steps=max_steps,
             gamma=gamma,
             spikes_to_value=spikes_to_value,
+            value_offset=value_offset,
             start_actor_train=start_actor_train,
             num_test_episodes=num_test_episodes,
         )
@@ -82,8 +90,7 @@ class A2CTrainer:
             logger.info(f"Initialized TensorBoard log_dir:\n{self.writer.log_dir}")
 
     def fit(self, agent: A2CAgent, env_name: str, num_episodes: Optional[int] = None):
-        if num_episodes is None:
-            num_episodes = self.num_episodes
+        num_episodes = num_episodes or self.num_episodes
 
         agent.to(self.device)
 
@@ -95,7 +102,7 @@ class A2CTrainer:
         if self.log:
             assert self.writer is not None
 
-            self.writer.add_hparams(hparams, {"hparam/mean_total_reward": -1.0}, run_name=".")
+            self.writer.add_hparams(hparams, {"mean_total_reward": -1.0}, run_name=".")
 
         for i in range(num_episodes):
             render = True if i % self.heavy_log_freq == 0 else False
@@ -103,7 +110,9 @@ class A2CTrainer:
 
             logger.info(f"Total reward after {agent.num_episodes} episodes: {episode.total_reward}")
 
-            deltas: List[float] = []
+            # deltas: List[float] = []
+            critic_rewards: List[float] = []
+            actor_rewards: List[float] = []
 
             for transition in episode.transitions:
                 observation = torch.from_numpy(transition.observation).to(self.device)
@@ -112,34 +121,48 @@ class A2CTrainer:
                 reward = transition.reward
                 done = transition.done
 
-                value = agent.run_critic(observation=observation, train=False) if not done else 0.0
-                prev_value = agent.run_critic(observation=prev_observation, train=False)
+                value = (
+                    self.value_offset + self.spikes_to_value * agent.run_critic(observation=observation, train=False)
+                    if not done
+                    else 0.0
+                )
+                prev_value = self.value_offset + self.spikes_to_value * agent.run_critic(
+                    observation=prev_observation, train=False
+                )
 
                 delta = self.compute_delta(value=value, prev_value=prev_value, reward=reward)
-                deltas.append(delta)
+                # deltas.append(delta)
 
-                self.train_critic(agent=agent, observation=observation, prev_observation=prev_observation, delta=delta)
+                critic_reward = -abs(delta)
+                critic_rewards.append(critic_reward)
+                self.train_critic(agent=agent, observation=observation, reward=critic_reward)
 
                 if agent.num_episodes > self.start_actor_train:
-                    self.train_actor(agent=agent, observation=prev_observation, delta=delta, action=action)
-
-                # if done:
-                #     self.update_net(net=agent.actor.network, total_reward=sum(deltas), steps=len(episode.transitions) - 1)
-                #     self.update_net(net=agent.critic.network, total_reward=sum(deltas), steps=len(episode.transitions) - 1)
+                    actor_reward = value * self.gamma - prev_value
+                    actor_rewards.append(actor_reward)
+                    self.train_actor(agent=agent, observation=prev_observation, reward=actor_reward, action=action)
 
                 if self.log:
                     assert self.writer is not None
 
                     self.writer.add_scalar("Train/delta", delta, agent.num_steps)
                     self.writer.add_scalar("Train/value", value, agent.num_steps)
-                    self.writer.add_scalar("Train/prev_value", prev_value, agent.num_steps)
 
                 agent.num_steps += 1
+
+            self.update_net(
+                net=agent.critic.network, total_reward=sum(critic_rewards), steps=len(episode.transitions) - 1
+            )
+
+            if self.num_test_episodes > self.start_actor_train:
+                self.update_net(
+                    net=agent.actor.network, total_reward=sum(actor_rewards), steps=len(episode.transitions) - 1
+                )
 
             if self.log:
                 assert self.writer is not None
 
-                self.writer.add_scalar("Train/mean_delta", torch.tensor(deltas).mean().item(), agent.num_episodes)
+                # self.writer.add_scalar("Train/mean_delta", torch.tensor(deltas).mean().item(), agent.num_episodes)
                 self.writer.add_scalar("Train/total_reward", episode.total_reward, agent.num_episodes)
                 self.writer.add_histogram(
                     "Train/actions",
@@ -152,10 +175,10 @@ class A2CTrainer:
                 if self.log:
                     assert self.writer is not None
 
-                    self.writer.add_video("Train/replay", episode.replay, agent.num_episodes, fps=10)
+                    self.writer.add_video("Replay/Train", episode.replay, agent.num_episodes, fps=24)
 
-                    agent.log_weights(self.writer, tag_prefix="Train")
-                    agent.log_spikes(self.writer, tag_prefix="Train")
+                    agent.log_weights(self.writer)
+                    agent.log_spikes(self.writer)
                     # agent.log_voltages(self.writer, tag_prefix="Train")
 
             agent.num_episodes += 1
@@ -184,24 +207,25 @@ class A2CTrainer:
         total_rewards_tensor = torch.tensor(total_rewards)
         mean_total_reward = total_rewards_tensor.mean().item()
 
-        rendered_episode = self.play_episode(agent=agent, env_name=env_name, render=True)
+        rendered_episode = self.play_episode(agent=agent, env_name=env_name, render=True, device=self.device)
         rendered_episode.render_replay(output_path=f"{self.log_dir}/{agent.num_episodes}={mean_total_reward}.gif")
 
         if self.log:
             assert self.writer is not None
 
-            self.writer.add_scalar("Test/mean_total_reward", mean_total_reward, agent.num_episodes)
-            self.writer.add_hparams(hparams, {"hparam/mean_total_reward": mean_total_reward}, run_name=".")
-            self.writer.add_video("Test/replay", rendered_episode.replay, agent.num_episodes)
+            self.writer.add_scalar("mean_total_reward", mean_total_reward, agent.num_episodes)
+            self.writer.add_video("Replay/Test", rendered_episode.replay, agent.num_episodes, fps=24)
             self.writer.flush()
 
         return total_rewards_tensor
 
     def play_episode(
-        self, agent: A2CAgent, env_name: str, render: bool = False, device: torch.device = torch.device("cpu")
+        self,
+        agent: A2CAgent,
+        env_name: str,
+        render: bool = False,
+        device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ) -> Episode:
-        agent.actor.network.to(device)
-
         env = make_wrapped_env(env_name=env_name)
         done = False
         step = 0
@@ -210,11 +234,10 @@ class A2CTrainer:
         transitions = []
 
         while not done and step < self.max_steps:
-            observation_tensor = torch.from_numpy(observation).float()
+            observation_tensor = torch.from_numpy(observation).float().to(device)
             action = agent.run_actor(observation_tensor)
 
             prev_observation = observation
-
             observation, reward, done, info = env.step(action)
 
             render_ = None
@@ -235,33 +258,31 @@ class A2CTrainer:
 
         return Episode(transitions=transitions)
 
-    def train_actor(self, agent: A2CAgent, observation: torch.Tensor, delta: float, action: int):
+    def train_actor(self, agent: A2CAgent, observation: torch.Tensor, reward: float, action: int):
         # only the neuron corresponding to the action being trained should spike
-        out_agent_shape = agent.actor.network.layers[OUTPUT_LAYER_NAME].shape
-        clamp = torch.zeros(agent.actor.time, *out_agent_shape).bool()
+        clamp = torch.zeros(agent.actor.n_out).reshape(-1, agent.actor.action_space_size).bool().to(observation.device)
         clamp[..., action] = 1
-        unclamp = ~clamp
+        unclamp = ~clamp.flatten()
 
         agent.run_actor(
             observation=observation,
             train=True,
-            reward=delta,
+            reward=reward,
             # clamp={OUTPUT_LAYER_NAME: clamp},
             unclamp={OUTPUT_LAYER_NAME: unclamp},  # TODO: switch to competition to remove this
         )
 
-    def train_critic(self, agent: A2CAgent, observation: torch.Tensor, prev_observation: torch.Tensor, delta: float):
+    def train_critic(self, agent: A2CAgent, observation: torch.Tensor, reward: float):
         # TODO: add eligibility trace
-        agent.run_critic(observation=observation, reward=-delta, train=True)
-        # agent.run_critic(observation=prev_observation, reward=delta, train=True)  # TODO: remove
+        agent.run_critic(observation=observation, reward=reward, train=True)
 
     def compute_delta(self, value: float, prev_value: float, reward: float):
-        return self.spikes_to_value * (value * self.gamma - prev_value) + reward
+        return (reward + self.gamma * value) - prev_value
 
-    # def update_net(self, net: Network, total_reward: float, steps: int):
-    #     if net.reward_fn is not None:
-    #         print("updating")
-    #         net.reward_fn.update(
-    #             accumulated_reward=total_reward,
-    #             steps=steps,
-    #         )
+    @staticmethod
+    def update_net(net: Network, total_reward: float, steps: int):
+        if net.reward_fn is not None:
+            net.reward_fn.update(
+                accumulated_reward=total_reward,
+                steps=steps,
+            )

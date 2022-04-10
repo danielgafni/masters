@@ -9,7 +9,7 @@ class ActorConfig(MLPConfig):
 
 
 class Actor(MLP):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, action_space_size: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.action_space_size = self.n_out
+        self.action_space_size = action_space_size

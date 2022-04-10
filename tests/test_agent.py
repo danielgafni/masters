@@ -12,12 +12,12 @@ from tests.test_make_wrapped_env import env  # noqa
 
 @pytest.fixture
 def actor():
-    return MLP(input_shape=[4], output_shape=[2])
+    return MLP(input_shape=[4], n_hidden=0, n_out=2)
 
 
 @pytest.fixture
 def critic():
-    return MLP(input_shape=[4], output_shape=[1])
+    return MLP(input_shape=[4], n_hidden=0, n_out=1)
 
 
 @pytest.fixture
