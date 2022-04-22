@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -37,6 +38,7 @@ class Episode:
         return video
 
     def render_replay(self, output_path: str):
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         Image.fromarray(self.transitions[0].render).save(
             output_path,
             save_all=True,

@@ -6,11 +6,15 @@ import hydra
 from bindsnet.encoding.encoders import GaussianReceptiveFieldsEncoder
 from hydra.core.config_store import ConfigStore
 from hydra.utils import instantiate
+from omegaconf import OmegaConf
 
 from masters.a2c.agent import A2CAgent, A2CAgentConfig
 from masters.a2c.trainer import A2CTrainer, A2CTrainerConfig
 from masters.networks.actor import ActorConfig
 from masters.networks.critic import CriticConfig
+
+logger = logging.getLogger(__name__)
+
 
 cartpole_info = {
     0: dict(start=-4.8, end=4.8, scale=0.5, n=20),
@@ -44,7 +48,7 @@ class CartPoleCriticConfig(CriticConfig):
     input_shape: List[int] = field(default_factory=lambda: [260])
     # n_hidden: int = 100
     n_out: int = 100
-    a_minus: float = -1e2
+    a_minus: float = -1e-2
     a_plus: float = 1e-2
     thresh: float = -57.0
     weight_decay: Optional[float] = 1e-2
@@ -78,7 +82,6 @@ class CartPoleA2CTrainerConfig(A2CTrainerConfig):
     spikes_to_value: float = 0.15
     value_offset: float = -3.0
     start_actor_train: int = 200
-    num_test_episodes: int = 200
     experiment_name: str = "a2c/CartPole"
 
     @staticmethod
@@ -93,6 +96,9 @@ class RunConfig:
     trainer: CartPoleA2CTrainerConfig = CartPoleA2CTrainerConfig()
     intensity: float = 200
     logging_level: str = "INFO"
+    fit: bool = True
+    num_rendered: int = 10
+    checkpoint: Optional[str] = None
 
     @staticmethod
     def register_config():
@@ -102,18 +108,22 @@ class RunConfig:
 
 def run(cfg: RunConfig):
     encoder = GaussianReceptiveFieldsEncoder(encoding_info=cartpole_info, intensity=cfg.intensity)
-    agent: A2CAgent = instantiate(cfg.agent, encoder=encoder)
+    agent: A2CAgent = (
+        instantiate(cfg.agent, encoder=encoder) if cfg.checkpoint is None else A2CAgent.load(cfg.checkpoint)
+    )
     trainer: A2CTrainer = instantiate(cfg.trainer)
 
     agent.to(trainer.device)
 
-    trainer.fit(agent, "CartPole-v0")
-    trainer.test(agent, "CartPole-v0")
+    if cfg.fit:
+        trainer.fit(agent, "CartPole-v0")
+    trainer.test(agent, "CartPole-v0", num_rendered=cfg.num_rendered)
 
 
 @hydra.main(config_path=None, config_name="run")
 def main(cfg: RunConfig):
     logging.basicConfig(level=cfg.logging_level)
+    logger.info(OmegaConf.to_yaml(cfg, resolve=True))
     run(cfg=cfg)
 
 
