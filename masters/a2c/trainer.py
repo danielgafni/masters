@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 from uuid import uuid1
@@ -6,9 +7,10 @@ from uuid import uuid1
 import torch
 from bindsnet.network import Network
 from torch.utils.tensorboard import SummaryWriter
+from tqdm.auto import tqdm
 
 from masters.a2c.agent import A2CAgent
-from masters.constants import LOGS_DIR
+from masters.constants import CHECKPOINTS_DIR, LOGS_DIR, RENDERS_DIR
 from masters.data import Episode, Transition
 from masters.env_wrapper import make_wrapped_env
 from masters.networks import OUTPUT_LAYER_NAME
@@ -28,7 +30,7 @@ class A2CTrainerConfig:
     spikes_to_value: float = 1.0
     value_offset: float = 0.0
     start_actor_train: int = 100
-    num_test_episodes: int = 200
+    num_test_episodes: int = 100
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     log: bool = True
     heavy_log_freq: int = 20
@@ -79,6 +81,8 @@ class A2CTrainer:
 
         self.run_id = str(uuid1())
         self.log_dir = str(LOGS_DIR / self.experiment_name / self.run_id)
+        self.checkpoints_dir = str(CHECKPOINTS_DIR / self.experiment_name / self.run_id)
+        self.renders_dir = str(RENDERS_DIR / self.experiment_name / self.run_id)
         self.writer: Optional[SummaryWriter] = None
         if log:
             assert self.experiment_name is not None
@@ -179,6 +183,10 @@ class A2CTrainer:
 
                     agent.log_weights(self.writer)
                     agent.log_spikes(self.writer)
+
+                    agent.save(
+                        os.path.join(self.checkpoints_dir, f"step={agent.num_episodes}reward={episode.total_reward}.pt")
+                    )
                     # agent.log_voltages(self.writer, tag_prefix="Train")
 
             agent.num_episodes += 1
@@ -187,7 +195,7 @@ class A2CTrainer:
             assert self.writer is not None
             self.writer.flush()
 
-    def test(self, agent: A2CAgent, env_name: str, num_episodes: Optional[int] = None):
+    def test(self, agent: A2CAgent, env_name: str, num_episodes: Optional[int] = None, num_rendered: int = 1):
         if num_episodes is None:
             num_episodes = self.num_test_episodes
 
@@ -200,7 +208,7 @@ class A2CTrainer:
 
         total_rewards: List[float] = []
 
-        for _ in range(num_episodes):
+        for _ in tqdm(range(num_episodes), desc="Testing agent"):
             episode = self.play_episode(agent=agent, env_name=env_name, render=False)
             total_rewards.append(episode.total_reward)
 
@@ -208,7 +216,6 @@ class A2CTrainer:
         mean_total_reward = total_rewards_tensor.mean().item()
 
         rendered_episode = self.play_episode(agent=agent, env_name=env_name, render=True, device=self.device)
-        rendered_episode.render_replay(output_path=f"{self.log_dir}/{agent.num_episodes}={mean_total_reward}.gif")
 
         if self.log:
             assert self.writer is not None
@@ -216,6 +223,16 @@ class A2CTrainer:
             self.writer.add_scalar("mean_total_reward", mean_total_reward, agent.num_episodes)
             self.writer.add_video("Replay/Test", rendered_episode.replay, agent.num_episodes, fps=24)
             self.writer.flush()
+
+            logger.info(f"Mean total reward after {num_episodes} runs: {mean_total_reward}")
+
+            if num_rendered > 0:
+                logger.info(f"Rendering {num_rendered} episodes into {self.renders_dir}")
+
+            for i in tqdm(range(num_rendered), desc="Rendering"):
+                render_path = os.path.join(self.renders_dir, f"{i}.gif")
+                rendered_episode = self.play_episode(agent=agent, env_name=env_name, render=True, device=self.device)
+                rendered_episode.render_replay(render_path)
 
         return total_rewards_tensor
 

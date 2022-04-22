@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -175,6 +176,16 @@ class A2CAgent:
             self.critic.network.monitors[OUTPUT_LAYER_NAME].get("s").view(1, self.critic.time, -1).float(),
             self.num_episodes,
         )
+
+    def save(self, save_path: str):
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        torch.save(self, save_path)
+
+    @classmethod
+    def load(cls, load_path: str):
+        agent = torch.load(load_path)
+        assert isinstance(agent, cls)
+        return agent
 
     # def log_voltages(self, writer: SummaryWriter, tag_prefix: str = ""):
     #     actor_fig = plt.Figure()
