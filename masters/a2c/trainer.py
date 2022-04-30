@@ -185,7 +185,9 @@ class A2CTrainer:
                     agent.log_spikes(self.writer)
 
                     agent.save(
-                        os.path.join(self.checkpoints_dir, f"step={agent.num_episodes}reward={episode.total_reward}.pt")
+                        os.path.join(
+                            self.checkpoints_dir, f"step_{agent.num_episodes}_reward_{episode.total_reward}.pt"
+                        )
                     )
                     # agent.log_voltages(self.writer, tag_prefix="Train")
 
@@ -215,14 +217,10 @@ class A2CTrainer:
         total_rewards_tensor = torch.tensor(total_rewards)
         mean_total_reward = total_rewards_tensor.mean().item()
 
-        rendered_episode = self.play_episode(agent=agent, env_name=env_name, render=True, device=self.device)
-
         if self.log:
             assert self.writer is not None
 
             self.writer.add_scalar("mean_total_reward", mean_total_reward, agent.num_episodes)
-            self.writer.add_video("Replay/Test", rendered_episode.replay, agent.num_episodes, fps=24)
-            self.writer.flush()
 
             logger.info(f"Mean total reward after {num_episodes} runs: {mean_total_reward}")
 
@@ -230,9 +228,12 @@ class A2CTrainer:
                 logger.info(f"Rendering {num_rendered} episodes into {self.renders_dir}")
 
             for i in tqdm(range(num_rendered), desc="Rendering"):
-                render_path = os.path.join(self.renders_dir, f"{i}.gif")
                 rendered_episode = self.play_episode(agent=agent, env_name=env_name, render=True, device=self.device)
+                render_path = os.path.join(self.renders_dir, f"{i}_reward_{rendered_episode.total_reward}.gif")
                 rendered_episode.render_replay(render_path)
+                self.writer.add_video("Replay/Test", rendered_episode.replay, agent.num_episodes, fps=24)
+
+            self.writer.flush()
 
         return total_rewards_tensor
 
@@ -288,10 +289,15 @@ class A2CTrainer:
             # clamp={OUTPUT_LAYER_NAME: clamp},
             unclamp={OUTPUT_LAYER_NAME: unclamp},  # TODO: switch to competition to remove this
         )
+        # for name in agent.actor.network.connections:
+        #     con = agent.actor.network.connections[name]
+        #     con.update_rule.nu *= 0.997
 
     def train_critic(self, agent: A2CAgent, observation: torch.Tensor, reward: float):
-        # TODO: add eligibility trace
         agent.run_critic(observation=observation, reward=reward, train=True)
+        # for name in agent.critic.network.connections:
+        #     con = agent.critic.network.connections[name]
+        #     con.update_rule.nu *= 0.997
 
     def compute_delta(self, value: float, prev_value: float, reward: float):
         return (reward + self.gamma * value) - prev_value
